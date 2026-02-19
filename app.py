@@ -2,7 +2,7 @@ import streamlit as st
 from openai import OpenAI
 
 # 1. 초기 설정
-client = OpenAI(api_key=st.secrets["sk-proj-534UQJ3xc38Co-zevRHlhJDc1WuzuGESkQiSfiyPw4nbRQ5Xq2AOcDBdwdZHUncwr-284v928ZT3BlbkFJuK4O_vQbZJ5PAeQrQPuZ1sNlIhSi9iYLBQIH5hx8DwUEMvFsa6TDIFoYNnIBX4tF7wdbQrY"])
+client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
 st.set_page_config(page_title="Shopping AI", layout="centered")
 st.title("🎁 AI 쇼핑 어시스턴트")
