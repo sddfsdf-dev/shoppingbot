@@ -30,13 +30,14 @@ if "turn" not in st.session_state:
 if "finished" not in st.session_state:
     st.session_state.finished = False
 
+# 대화 기록 표시
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
 # 4. 대화 로직
 if not st.session_state.finished:
-    if prompt := st.chat_input("Type your answer..."):
+    if prompt := st.chat_input("Type your answer here..."):
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)
@@ -57,46 +58,35 @@ if not st.session_state.finished:
             st.session_state.finished = True
             st.rerun()
 
-# 5. 하이브리드 추천 로직 (CSV 우선 -> 없으면 GPT 자체 추천)
+# 5. 텍스트 기반 추천 로직 (이미지 제거)
 if st.session_state.finished:
     st.divider()
-    with st.spinner("Finding the best match..."):
+    with st.spinner("Finding the best recommendation..."):
         subset = product_df[['id', 'name', 'price', 'category', 'keywords']]
         
-        # GPT에게 판단 요청 (ID를 주거나, 없으면 'NONE'이라고 답하게 함)
+        # GPT가 CSV 데이터를 참고하여 텍스트로만 추천 대답을 생성
         res = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": f"You are a professional shopper. Look at this list:\n{subset.to_string()}\n\n1. If a product matches the user's need, return ONLY the ID number.\n2. If NO product matches, return 'NONE' and provide a brief recommendation from your own knowledge."}
+                {"role": "system", "content": f"""You are a professional shopper. 
+                Below is our product list:
+                {subset.to_string()}
+                
+                Task:
+                1. If a matching product exists in the list, recommend it by name and price.
+                2. If no exact match exists, use your own knowledge to recommend a suitable product.
+                3. Provide the recommendation in a friendly, conversational text format. 
+                4. DO NOT use image tags or markdown for images. Just text."""}
             ] + st.session_state.messages
         )
         
-        ans = res.choices[0].message.content
-        best_id_match = re.search(r'\d+', ans)
+        recommendation_text = res.choices[0].message.content
+        
+        # 추천 결과 표시
+        st.subheader("🎯 My Recommendation")
+        with st.chat_message("assistant"):
+            st.markdown(recommendation_text)
+        
+        st.balloons()
 
-        # 케이스 A: CSV에서 찾은 경우
-        if best_id_match and "NONE" not in ans.upper():
-            try:
-                best_id = int(best_id_match.group())
-                item = product_df[product_df['id'] == best_id].iloc[0]
-                
-                st.subheader("🎯 Found a perfect match in our store!")
-                with st.container(border=True):
-                    c1, c2 = st.columns([1, 1.5])
-                    with c1: st.image(item['img_url'], use_container_width=True)
-                    with c2:
-                        st.write(f"### {item['name']}")
-                        st.write(f"**Price:** ${item['price']}")
-                        st.info("This is the best choice from our premium collection.")
-                st.balloons()
-            except:
-                st.error("Matching error. But I have an idea!")
-
-        # 케이스 B: CSV에 없어서 GPT가 직접 추천하는 경우
-        else:
-            st.subheader("🌟 Special Recommendation for You")
-            st.info("We don't have this exact item in our current CSV catalog, but based on my expert knowledge, here is what you should look for:")
-            st.markdown(ans.replace("NONE", "").strip())
-            st.caption("Tip: You can find similar items at major retailers within your budget.")
-
-    st.success("✅ Interaction finished. Please click 'Next' in Qualtrics.")
+    st.success("✅ Interaction finished. Please return to Qualtrics and click 'Next'.")
