@@ -17,12 +17,12 @@ is_controllable = group_id in ["4", "5", "6"]
 ad_pos = "separated" if group_id in ["1", "4"] else \
          "in-text" if group_id in ["2", "5"] else "following"
 
-# 3. 세션 초기화 (상태 관리를 더 엄격하게 변경)
+# 3. 세션 초기화
 if "messages" not in st.session_state:
     st.session_state.messages = [{"role": "assistant", "content": "Hello! I'm here to help you shop. **1. What kind of product category are you looking for?**"}]
 if "turn" not in st.session_state: st.session_state.turn = 1
 if "finished" not in st.session_state: st.session_state.finished = False
-if "recommendation_generated" not in st.session_state: st.session_state.recommendation_generated = False # 중복 방지 핵심 플래그
+if "recommendation_generated" not in st.session_state: st.session_state.recommendation_generated = False 
 if "ad_pref_asked" not in st.session_state: st.session_state.ad_pref_asked = False 
 if "show_ad" not in st.session_state: st.session_state.show_ad = True 
 if "flow_complete" not in st.session_state: st.session_state.flow_complete = False
@@ -40,10 +40,9 @@ ad_tag = '<span style="color: #006621; border: 1px solid #006621; padding: 0px 3
 if not st.session_state.finished:
     if prompt := st.chat_input("Type your answer here..."):
         st.session_state.messages.append({"role": "user", "content": prompt})
-        
-        with st.chat_message("user"):
-            st.markdown(prompt)
+        st.rerun()
 
+    if len(st.session_state.messages) > 0 and st.session_state.messages[-1]["role"] == "user":
         with st.chat_message("assistant"):
             if st.session_state.turn < 3:
                 time.sleep(0.5)
@@ -57,11 +56,10 @@ if not st.session_state.finished:
 
 # 5. 최종 응답 및 광고 로직
 if st.session_state.finished:
-    # 플래그가 False일 때만 단 한 번 API 호출
+    # 5-1. 추천 답변 및 Separated 광고 생성 (최초 1회)
     if not st.session_state.recommendation_generated:
         with st.chat_message("assistant"):
             with st.spinner("Generating recommendation..."):
-                # 추천 답변 생성 프롬프트
                 if ad_pos == "in-text":
                     sys_msg = f"Recommend ONE product. Start with a brief intro, then put {ad_tag} right before the product name. 1 short paragraph."
                 elif ad_pos == "following":
@@ -71,13 +69,12 @@ if st.session_state.finished:
 
                 res = client.chat.completions.create(
                     model="gpt-4o-mini",
-                    messages=[{"role": "system", "content": sys_msg}] + st.session_state.messages[:-1] # 마지막 입력 포함
+                    messages=[{"role": "system", "content": sys_msg}] + st.session_state.messages
                 )
                 final_advice = res.choices[0].message.content.replace('*', '')
                 st.session_state.messages.append({"role": "assistant", "content": final_advice})
                 
-                # Separated 광고 생성 및 캐싱
-                if ad_pos == "separated" and st.session_state.show_ad:
+                if ad_pos == "separated":
                     ad_res = client.chat.completions.create(
                         model="gpt-4o-mini",
                         messages=[{"role": "system", "content": "Headline | Description | Price. 2 sentences max. No labels."}] + st.session_state.messages
@@ -98,31 +95,28 @@ if st.session_state.finished:
                         """
                     except: pass
                 
-                # 생성이 완료되었음을 기록
                 st.session_state.recommendation_generated = True
                 st.rerun()
 
-    # Separated 광고 출력 (추천 답변 바로 아래)
-    if ad_pos == "separated" and st.session_state.ad_html_cache and st.session_state.show_ad:
+    # 5-2. Separated 광고 렌더링 (가장 먼저 출력되도록 보장)
+    if ad_pos == "separated" and st.session_state.show_ad and st.session_state.ad_html_cache:
         components.html(st.session_state.ad_html_cache, height=170)
 
-    # 제어권 인터랙션 (추천 완료 후 별도로 진행)
+    # 5-3. 제어권 질문 던지기
     if is_controllable and not st.session_state.ad_pref_asked:
-        with st.chat_message("assistant"):
-            ctrl_q = "You might have noticed an advertisement based on your shopping intent. **Would you like to keep seeing these tailored ads, or would you prefer to turn them off?**"
-            st.markdown("---")
-            st.markdown(ctrl_q)
-            st.session_state.messages.append({"role": "assistant", "content": ctrl_q})
-            st.session_state.ad_pref_asked = True
-            # 주의: 여기서 st.rerun()을 하지 않고 chat_input을 기다립니다.
+        time.sleep(1.0) # 사용자가 추천을 읽을 시간 확보
+        ctrl_q = "You might have noticed an advertisement based on your shopping intent. **Would you like to keep seeing these tailored ads, or would you prefer to turn them off?**"
+        st.session_state.messages.append({"role": "assistant", "content": ctrl_q})
+        st.session_state.ad_pref_asked = True
+        st.rerun()
 
-    # 제어권 답변 처리
+    # 5-4. 제어권 답변 받기
     if is_controllable and st.session_state.ad_pref_asked and not st.session_state.flow_complete:
         if ad_resp := st.chat_input("Type 'Keep ads' or 'Turn off ads'..."):
             st.session_state.messages.append({"role": "user", "content": ad_resp})
             if any(x in ad_resp.lower() for x in ["off", "no", "끄", "안", "turn off"]):
                 st.session_state.show_ad = False
-                confirm_msg = "Understood. I have **turned off** the ads for you."
+                confirm_msg = "Understood. I have **turned off** the ads for you. (The previous ad remains for this turn but will be hidden in next interactions.)"
             else:
                 confirm_msg = "Great! I will continue to provide tailored recommendations."
             st.session_state.messages.append({"role": "assistant", "content": confirm_msg})
@@ -131,7 +125,7 @@ if st.session_state.finished:
     elif not is_controllable:
         st.session_state.flow_complete = True
 
-    # 최종 안내
+    # 6. 최종 안내
     if st.session_state.flow_complete:
         st.balloons()
         st.success("✅ Interaction finished. Please return to Qualtrics and click 'Next'.")
