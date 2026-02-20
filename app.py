@@ -24,7 +24,7 @@ if "turn" not in st.session_state: st.session_state.turn = 1
 if "finished" not in st.session_state: st.session_state.finished = False
 if "recommendation_generated" not in st.session_state: st.session_state.recommendation_generated = False 
 if "ad_pref_asked" not in st.session_state: st.session_state.ad_pref_asked = False 
-if "show_ad" not in st.session_state: st.session_state.show_ad = True # 광고 노출 여부 변수
+if "show_ad" not in st.session_state: st.session_state.show_ad = True 
 if "flow_complete" not in st.session_state: st.session_state.flow_complete = False
 if "ad_control_choice" not in st.session_state:
     st.session_state.ad_control_choice = "fixed"
@@ -34,7 +34,6 @@ def display_chat():
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"], unsafe_allow_html=True)
-            # 중요: 사용자가 OFF를 했더라도 이번 세션에서는 광고 데이터를 유지하여 보여줍니다.
             if "ad_html" in msg:
                 components.html(msg["ad_html"], height=175)
 
@@ -82,14 +81,25 @@ if st.session_state.finished:
                 final_advice = res.choices[0].message.content.replace('*', '')
                 new_msg = {"role": "assistant", "content": final_advice}
 
+                # --- 수정된 광고 생성 로직 (라벨 제거 프롬프트 및 클리닝 로직) ---
                 if ad_pos == "separated":
                     ad_res = client.chat.completions.create(
                         model="gpt-4o-mini",
-                        messages=[{"role": "system", "content": f"Analyze: {final_advice}. Pick ONE competitor. Output: Brand & Model | One-sentence feature | Price."}]
+                        messages=[{"role": "system", "content": f"""
+                            Analyze: {final_advice}. Pick ONE competitor product from a different brand.
+                            Output ONLY in this format, NO labels like Brand/Model/Price:
+                            Product Name | One-sentence feature | Price
+                            Example: Sony WH-1000XM5 | World-class noise cancellation | $399
+                            """}]
                     )
                     try:
-                        parts = ad_res.choices[0].message.content.replace('*', '').split('|')
-                        h, d, p = parts[0].strip(), parts[1].strip(), (parts[2].strip() if len(parts) > 2 else "")
+                        # 라벨 강제 제거를 위한 정제 로직
+                        raw_ad = ad_res.choices[0].message.content.replace('*', '').replace('"', '')
+                        parts = raw_ad.split('|')
+                        h = parts[0].replace('Brand & Model:', '').replace('Brand:', '').replace('Product:', '').strip()
+                        d = parts[1].replace('One-sentence feature:', '').replace('Feature:', '').replace('Description:', '').strip()
+                        p = parts[2].replace('Price:', '').strip() if len(parts) > 2 else ""
+                        
                         new_msg["ad_html"] = f"""
                         <div style="border: 1px solid #dadce0; padding: 18px; border-radius: 8px; font-family: sans-serif; box-shadow: 0 1px 6px rgba(0,0,0,0.1); margin-top: 10px; background-color: white;">
                             <div style="display: flex; align-items: center; margin-bottom: 8px;">
@@ -102,6 +112,7 @@ if st.session_state.finished:
                         </div>
                         """
                     except: pass
+                # ---------------------------------------------------------
                 
                 st.session_state.messages.append(new_msg)
                 st.session_state.recommendation_generated = True
@@ -121,7 +132,6 @@ if st.session_state.finished:
             
             if any(x in ad_resp.lower() for x in ["off", "no", "끄", "안", "turn off"]):
                 st.session_state.ad_control_choice = "OFF"
-                # 핵심: 지우지 않고 안내만 제공
                 confirm_msg = "Understood. I will **not show you any more ads** from our next interaction. You can always turn them back on in your settings if you change your mind."
             else:
                 st.session_state.ad_control_choice = "KEEP"
