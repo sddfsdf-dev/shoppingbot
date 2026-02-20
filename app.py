@@ -2,20 +2,16 @@ import streamlit as st
 import pandas as pd
 from openai import OpenAI
 
-# 1. OpenAI 설정 (Secrets 확인 필수)
-try:
-    client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
-except Exception as e:
-    st.error("OpenAI API Key가 설정되지 않았습니다. Secrets를 확인해주세요.")
-    st.stop()
+# 1. OpenAI 설정
+client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
 st.set_page_config(page_title="AI Shopping Assistant", layout="centered")
 
-# CSS 수정 (unsafe_allow_html=True 가 올바른 문법입니다)
+# 디자인: 말풍선 및 레이아웃 정리
 st.markdown("""
     <style>
-    .main { background-color: #f5f7f9; }
-    .stChatMessage { border-radius: 15px; }
+    .stChatMessage { border-radius: 15px; margin-bottom: 10px; }
+    .stButton button { width: 100%; border-radius: 20px; background-color: #ff4b4b; color: white; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -25,81 +21,82 @@ st.title("🛍️ Personal AI Shopper")
 @st.cache_data
 def load_data():
     try:
-        # 이미 products.csv로 만드셨으니 그대로 읽어옵니다.
         df = pd.read_csv('products.csv')
         return df
-    except Exception as e:
+    except:
         return None
 
 product_df = load_data()
 
-# 파일 로드 실패 시 에러 메시지
-if product_df is None:
-    st.error("⚠️ 'products.csv' 파일을 읽을 수 없습니다. 파일 내용이 비어있거나 형식이 잘못되었는지 확인해주세요.")
-    st.stop()
-
-# 3. 채팅 세션 관리
+# 3. 세션 및 질문 관리
 if "messages" not in st.session_state:
+    # 첫 번째 질문 고정: 어떤 제품군?
     st.session_state.messages = [
-        {"role": "assistant", "content": "Hello! I'm your personal shopping assistant. How can I help you today?"}
+        {"role": "assistant", "content": "Hello! I'm here to help you shop. **First, what kind of product category are you looking for?** (e.g., Electronics, Beauty, Sports...)"}
     ]
 if "turn" not in st.session_state:
-    st.session_state.turn = 0
+    st.session_state.turn = 1
 
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# 4. 대화 로직 (3턴 제한)
-if st.session_state.turn < 3:
-    if prompt := st.chat_input("Type your message here..."):
+# 4. 고정된 3단계 질문 로직
+if st.session_state.turn <= 3:
+    if prompt := st.chat_input("Type your answer..."):
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)
 
         with st.chat_message("assistant"):
-            try:
-                response = client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[{"role": "system", "content": "You are a helpful shopping assistant. Ask a short follow-up question."}] + st.session_state.messages
-                )
-                ai_msg = response.choices[0].message.content
-                st.markdown(ai_msg)
-                st.session_state.messages.append({"role": "assistant", "content": ai_msg})
-                st.session_state.turn += 1
-                if st.session_state.turn == 3:
-                    st.rerun()
-            except Exception as e:
-                st.error(f"AI 응답 생성 중 오류 발생: {e}")
-
-else:
-    # 5. 최종 추천 화면
-    st.divider()
-    with st.spinner("Finding the best match for you..."):
-        # GPT에게 CSV 데이터를 요약해서 전달
-        subset = product_df[['id', 'name', 'price', 'keywords']]
-        try:
-            res = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": f"Based on the dialogue, pick the best product ID from this list: \n{subset.to_string()}\n\nReturn ONLY the ID number (e.g., 5)."}
-                ] + st.session_state.messages
-            )
+            if st.session_state.turn == 1:
+                # 두 번째 질문: 누가 쓰나요?
+                next_question = "Got it. **Who is this product for?** (e.g., For myself, a gift for my wife, for a friend...)"
+            elif st.session_state.turn == 2:
+                # 세 번째 질문: 가격대는?
+                next_question = "Finally, **what is your maximum budget for this purchase?** (Please specify the amount in dollars $)"
             
-            best_id_str = res.choices[0].message.content.strip()
-            # 숫자가 아닌 문자열이 섞여 있을 경우를 대비해 숫자만 추출
-            best_id = int(''.join(filter(str.isdigit, best_id_str)))
+            if st.session_state.turn < 3:
+                st.markdown(next_question)
+                st.session_state.messages.append({"role": "assistant", "content": next_question})
+                st.session_state.turn += 1
+            else:
+                # 3번째 답변 수집 완료
+                st.session_state.turn += 1
+                st.rerun()
+
+# 5. 최종 추천 (ID 1~100 중 최적템 선택)
+else:
+    st.divider()
+    with st.spinner("Finding the best product from our 100 premium items..."):
+        subset = product_df[['id', 'name', 'price', 'category', 'keywords']]
+        
+        res = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": f"You are a professional shopper. Based on the user's category, target, and budget, pick the best product ID from this CSV data: \n{subset.to_string()}\n\nReturn ONLY the ID number."}
+            ] + st.session_state.messages
+        )
+        
+        try:
+            # ID만 추출하여 해당 상품 정보 표시
+            best_id = int(''.join(filter(str.isdigit, res.choices[0].message.content)))
             item = product_df[product_df['id'] == best_id].iloc[0]
             
-            st.subheader("🎯 AI Expert's Choice")
-            col1, col2 = st.columns([1, 2])
-            with col1:
-                st.image(item['img_url'])
-            with col2:
-                st.write(f"### {item['name']}")
-                st.write(f"**Price:** ${item['price']}")
-                st.success("This is the perfect match for your needs!")
-        except Exception as e:
-            st.info("Great! We've found a perfect item for you. Please proceed to the next page.")
+            st.subheader("🎯 My Top Recommendation")
+            
+            with st.container(border=True):
+                col1, col2 = st.columns([1, 1.5])
+                with col1:
+                    st.image(item['img_url'])
+                with col2:
+                    st.write(f"### {item['name']}")
+                    st.write(f"**Price:** ${item['price']}")
+                    st.write(f"**Category:** {item['category']}")
+                    st.success("This item matches all your criteria!")
+            st.balloons()
+            
+        except:
+            st.write("I've found a great match! Please see the results in your survey.")
 
-    st.warning("Please click the 'Next' button in your Qualtrics survey.")
+    st.info("✅ Chat finished. Please return to the Qualtrics window and click **'Next'**.")
