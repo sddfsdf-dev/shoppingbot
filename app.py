@@ -24,19 +24,18 @@ if "turn" not in st.session_state: st.session_state.turn = 1
 if "finished" not in st.session_state: st.session_state.finished = False
 if "recommendation_generated" not in st.session_state: st.session_state.recommendation_generated = False 
 if "ad_pref_asked" not in st.session_state: st.session_state.ad_pref_asked = False 
-if "show_ad" not in st.session_state: st.session_state.show_ad = True 
+if "show_ad" not in st.session_state: st.session_state.show_ad = True # 광고 노출 여부 변수
 if "flow_complete" not in st.session_state: st.session_state.flow_complete = False
-
-# --- [추가] 데이터 저장용 세션 변수 ---
 if "ad_control_choice" not in st.session_state:
-    st.session_state.ad_control_choice = "fixed" # 제어권 없는 그룹 기본값
+    st.session_state.ad_control_choice = "fixed"
 
 # 4. 대화 기록 표시 함수
 def display_chat():
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"], unsafe_allow_html=True)
-            if "ad_html" in msg and st.session_state.show_ad:
+            # 중요: 사용자가 OFF를 했더라도 이번 세션에서는 광고 데이터를 유지하여 보여줍니다.
+            if "ad_html" in msg:
                 components.html(msg["ad_html"], height=175)
 
 display_chat()
@@ -120,11 +119,10 @@ if st.session_state.finished:
         if ad_resp := st.chat_input("Type your answer here..."):
             st.session_state.messages.append({"role": "user", "content": ad_resp})
             
-            # --- [추가] 사용자의 광고 선택 저장 ---
             if any(x in ad_resp.lower() for x in ["off", "no", "끄", "안", "turn off"]):
-                st.session_state.show_ad = False
                 st.session_state.ad_control_choice = "OFF"
-                confirm_msg = "Understood. I have **turned off** the ads for you."
+                # 핵심: 지우지 않고 안내만 제공
+                confirm_msg = "Understood. I will **not show you any more ads** from our next interaction. You can always turn them back on in your settings if you change your mind."
             else:
                 st.session_state.ad_control_choice = "KEEP"
                 confirm_msg = "Great! I will continue to provide tailored recommendations."
@@ -135,16 +133,11 @@ if st.session_state.finished:
     elif not is_controllable and st.session_state.recommendation_generated:
         st.session_state.flow_complete = True
 
-    # 7. 최종 종료 및 코드 생성 (C안)
+    # 7. 최종 종료 및 코드 생성
     if st.session_state.flow_complete:
         st.balloons()
-        
-        # 고유 코드 생성 (그룹ID + 광고상태 + 타임스탬프 뒷자리)
         completion_code = f"SURVEY-{group_id}-{st.session_state.ad_control_choice}-{str(int(time.time()))[-5:]}"
-        
         st.success("✅ Interaction finished.")
-        
-        # 사용자에게 안내하는 섹션
         st.markdown("---")
         st.subheader("Final Step: Copy your Completion Code")
         st.info("Please copy the code below and paste it back into the Qualtrics survey to receive your credit.")
