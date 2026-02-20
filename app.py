@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 from openai import OpenAI
+import re
 
 # 1. OpenAI 설정
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
@@ -17,50 +18,41 @@ def load_data():
 
 product_df = load_data()
 
-# --- [수정] 구글 배너 스타일 광고 출력 함수 ---
-def render_ad_banner():
-    user_query = ""
-    if "messages" in st.session_state:
-        user_msgs = [m["content"] for m in st.session_state.messages if m["role"] == "user"]
-        if user_msgs:
-            user_query = " ".join(user_msgs).lower()
+# --- [수정] 마지막 답변과 함께 뜰 구글 스타일 광고 배너 ---
+def render_final_ad(user_context):
+    # GPT에게 광고로 제안할 '다른' 제품을 하나 고르게 함
+    ad_res = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": "You are an advertising system. Based on the user's interest, pick ONE alternative product that is different from their main preference but related. Provide a short catchy ad title and a price."}
+        ] + user_context
+    )
+    ad_content = ad_res.choices[0].message.content
 
-    # 광고 데이터 세트
-    ads = [
-        {"keyword": "perfume", "text": "Luxury Fragrance Sale: Up to 30% Off!", "link": "https://google.com"},
-        {"keyword": "tennis", "text": "Pro Racket Collection - New Arrivals", "link": "https://google.com"},
-        {"keyword": "electronic", "text": "Tech Week: Best Deals on Gadgets", "link": "https://google.com"},
-        {"keyword": "gift", "text": "Perfect Gifts for Your Loved Ones", "link": "https://google.com"}
-    ]
-
-    selected_ad = {"text": "Free Shipping on all orders over $50!", "link": "https://google.com"}
-    for ad in ads:
-        if ad["keyword"] in user_query:
-            selected_ad = ad
-            break
-
-    # 구글 배너 애드 스타일 CSS (답변 바로 밑에 위치)
     st.markdown(f"""
         <div style="
             border: 1px solid #e0e0e0;
-            background-color: #fafafa;
-            padding: 10px 15px;
-            margin-top: -10px;
-            margin-bottom: 20px;
-            border-radius: 5px;
-            font-family: 'Arial', sans-serif;
+            background-color: #f9f9f9;
+            padding: 15px;
+            margin-top: 20px;
+            border-radius: 8px;
+            font-family: 'Roboto', sans-serif;
         ">
-            <div style="color: #5f6368; font-size: 10px; margin-bottom: 5px; font-weight: bold;">[AD]</div>
+            <div style="color: #70757a; font-size: 11px; margin-bottom: 8px; font-weight: bold; letter-spacing: 0.5px;">[AD] Sponsored Content</div>
             <div style="display: flex; justify-content: space-between; align-items: center;">
-                <span style="color: #1a0dab; font-size: 14px; font-weight: 500;">{selected_ad['text']}</span>
-                <a href="{selected_ad['link']}" target="_blank" style="
+                <div>
+                    <div style="color: #1a0dab; font-size: 16px; font-weight: 500; margin-bottom: 4px;">{ad_content[:50]}...</div>
+                    <div style="color: #006621; font-size: 13px;">Special Offer Available Now</div>
+                </div>
+                <a href="https://google.com" target="_blank" style="
                     background-color: #1a73e8;
                     color: white;
-                    padding: 5px 12px;
+                    padding: 8px 20px;
                     text-decoration: none;
-                    font-size: 12px;
+                    font-size: 13px;
                     border-radius: 4px;
-                ">Visit</a>
+                    font-weight: bold;
+                ">Shop Now</a>
             </div>
         </div>
     """, unsafe_allow_html=True)
@@ -71,19 +63,14 @@ if "messages" not in st.session_state:
 if "turn" not in st.session_state: st.session_state.turn = 1
 if "finished" not in st.session_state: st.session_state.finished = False
 
-# 4. 대화 기록 및 광고 출력
-for i, msg in enumerate(st.session_state.messages):
+# 4. 대화 기록 표시 (일반 대화 중에는 광고 없음)
+for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
-    
-    # AI의 답변(assistant) 바로 다음에 광고 배너 삽입
-    if msg["role"] == "assistant":
-        # 첫 번째 인사는 광고 제외하고 싶다면 i > 0 조건을 추가하세요
-        render_ad_banner()
 
-# 5. 입력 로직
+# 5. 대화 진행 로직
 if not st.session_state.finished:
-    if prompt := st.chat_input("Type your answer..."):
+    if prompt := st.chat_input("Type your answer here..."):
         st.session_state.messages.append({"role": "user", "content": prompt})
         
         if st.session_state.turn == 1:
@@ -99,16 +86,25 @@ if not st.session_state.finished:
         
         st.rerun()
 
-# 6. 최종 추천 결과
-if st.session_state.finished and len(st.session_state.messages) < 7: # 추천 메시지가 중복 생성되지 않게 제어
-    with st.chat_message("assistant"):
-        with st.spinner("Analyzing..."):
-            subset = product_df[['id', 'name', 'price', 'category']]
-            res = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role": "system", "content": "You are a professional shopper. Recommend one clear product. No messy formatting."}] + st.session_state.messages
-            )
-            final_advice = res.choices[0].message.content
-            st.markdown(final_advice)
-            st.session_state.messages.append({"role": "assistant", "content": final_advice})
-            st.rerun()
+# 6. 마지막 추천 및 광고 동시 출력
+if st.session_state.finished:
+    # 추천 메시지가 이미 생성되었는지 확인 (중복 생성 방지)
+    is_already_recommended = any("Based on our conversation" in m["content"] for m in st.session_state.messages)
+    
+    if not is_already_recommended:
+        with st.chat_message("assistant"):
+            with st.spinner("Finding your perfect match..."):
+                subset = product_df[['id', 'name', 'price', 'category']]
+                res = client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[{"role": "system", "content": f"Our products: {subset.to_string()}\n\nTask: Recommend ONE product from the list. Start with 'Based on our conversation...'. Keep it natural and simple."}] + st.session_state.messages
+                )
+                final_advice = res.choices[0].message.content
+                st.markdown(final_advice)
+                st.session_state.messages.append({"role": "assistant", "content": final_advice})
+                
+                # --- 광고 배너: 추천 답변 바로 아래에만 딱 한 번 등장 ---
+                render_final_ad(st.session_state.messages)
+                
+        st.balloons()
+        st.success("✅ Interaction finished. Please return to Qualtrics and click 'Next'.")
