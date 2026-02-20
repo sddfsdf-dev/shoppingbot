@@ -27,6 +27,10 @@ if "ad_pref_asked" not in st.session_state: st.session_state.ad_pref_asked = Fal
 if "show_ad" not in st.session_state: st.session_state.show_ad = True 
 if "flow_complete" not in st.session_state: st.session_state.flow_complete = False
 
+# --- [추가] 데이터 저장용 세션 변수 ---
+if "ad_control_choice" not in st.session_state:
+    st.session_state.ad_control_choice = "fixed" # 제어권 없는 그룹 기본값
+
 # 4. 대화 기록 표시 함수
 def display_chat():
     for msg in st.session_state.messages:
@@ -60,24 +64,16 @@ if st.session_state.finished:
     if not st.session_state.recommendation_generated:
         with st.chat_message("assistant"):
             with st.spinner("Generating recommendation..."):
-                # 광고 강조 스타일 정의
-                # 1. AD 태그 (배경색 강조)
                 ad_tag = '<span style="color: white; background-color: #006621; padding: 2px 5px; border-radius: 3px; font-size: 11px; font-weight: bold; margin-right: 5px; vertical-align: middle;">AD</span>'
-                # 2. 광고 텍스트 스타일 (밑줄 + 굵게 + 색상)
                 ad_style = 'style="text-decoration: underline; font-weight: bold; color: #1a0dab;"'
                 
-                # A. 추천 답변 생성 프롬프트 수정
                 if ad_pos == "in-text":
-                    sys_msg = f"""Recommend ONE product. 
-                    You MUST insert the sponsored alternative WITHIN the paragraph.
-                    Format: "I recommend [Neutral Product]. However, you might also like {ad_tag} <span {ad_style}>[Sponsored Product]</span> which is..."
-                    The sponsored product MUST have the underline and bold style provided."""
+                    sys_msg = f"""Recommend ONE product. You MUST insert the sponsored alternative WITHIN the paragraph.
+                    Format: "I recommend [Neutral Product]. However, you might also like {ad_tag} <span {ad_style}>[Sponsored Product]</span> which is..." """
                 elif ad_pos == "following":
-                    sys_msg = f"""Recommend one product neutrally. 
-                    Then, start a NEW paragraph starting with {ad_tag}.
-                    In that paragraph, introduce a premium alternative.
-                    The alternative product name MUST be wrapped in: <span {ad_style}>[Product Name]</span>"""
-                else: # separated
+                    sys_msg = f"""Recommend one product neutrally. Then, start a NEW paragraph starting with {ad_tag}.
+                    In that paragraph, introduce a premium alternative wrapping its name in: <span {ad_style}>[Product Name]</span>"""
+                else: 
                     sys_msg = "Recommend ONE product neutrally. No ads in text. Under 2 sentences."
 
                 res = client.chat.completions.create(
@@ -87,11 +83,10 @@ if st.session_state.finished:
                 final_advice = res.choices[0].message.content.replace('*', '')
                 new_msg = {"role": "assistant", "content": final_advice}
 
-                # B. Separated 광고 생성 (기존 카드 스타일 유지)
                 if ad_pos == "separated":
                     ad_res = client.chat.completions.create(
                         model="gpt-4o-mini",
-                        messages=[{"role": "system", "content": f"Analyze: {final_advice}. Pick ONE competitor. Output: Brand & Model | One-sentence feature | Price. No intro."}]
+                        messages=[{"role": "system", "content": f"Analyze: {final_advice}. Pick ONE competitor. Output: Brand & Model | One-sentence feature | Price."}]
                     )
                     try:
                         parts = ad_res.choices[0].message.content.replace('*', '').split('|')
@@ -113,7 +108,7 @@ if st.session_state.finished:
                 st.session_state.recommendation_generated = True
                 st.rerun()
 
-    # 6-2. 제어권 및 종료 로직 (동일)
+    # 6-2. 제어권 및 종료 로직
     if is_controllable and not st.session_state.ad_pref_asked:
         time.sleep(0.8)
         ctrl_q = "You might have noticed an advertisement based on your shopping intent. **Would you like to keep seeing these tailored ads, or would you prefer to turn them off?**"
@@ -124,17 +119,34 @@ if st.session_state.finished:
     if is_controllable and st.session_state.ad_pref_asked and not st.session_state.flow_complete:
         if ad_resp := st.chat_input("Type your answer here..."):
             st.session_state.messages.append({"role": "user", "content": ad_resp})
+            
+            # --- [추가] 사용자의 광고 선택 저장 ---
             if any(x in ad_resp.lower() for x in ["off", "no", "끄", "안", "turn off"]):
                 st.session_state.show_ad = False
+                st.session_state.ad_control_choice = "OFF"
                 confirm_msg = "Understood. I have **turned off** the ads for you."
             else:
+                st.session_state.ad_control_choice = "KEEP"
                 confirm_msg = "Great! I will continue to provide tailored recommendations."
+            
             st.session_state.messages.append({"role": "assistant", "content": confirm_msg})
             st.session_state.flow_complete = True
             st.rerun()
     elif not is_controllable and st.session_state.recommendation_generated:
         st.session_state.flow_complete = True
 
+    # 7. 최종 종료 및 코드 생성 (C안)
     if st.session_state.flow_complete:
         st.balloons()
-        st.success("✅ Interaction finished. Please return to Qualtrics and click 'Next'.")
+        
+        # 고유 코드 생성 (그룹ID + 광고상태 + 타임스탬프 뒷자리)
+        completion_code = f"SURVEY-{group_id}-{st.session_state.ad_control_choice}-{str(int(time.time()))[-5:]}"
+        
+        st.success("✅ Interaction finished.")
+        
+        # 사용자에게 안내하는 섹션
+        st.markdown("---")
+        st.subheader("Final Step: Copy your Completion Code")
+        st.info("Please copy the code below and paste it back into the Qualtrics survey to receive your credit.")
+        st.code(completion_code, language="text")
+        st.write("After copying the code, you can close this window and return to the survey.")
