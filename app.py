@@ -65,9 +65,13 @@ if st.session_state.finished:
                 ad_tag = '<span style="color: white; background-color: #006621; padding: 2px 5px; border-radius: 3px; font-size: 11px; font-weight: bold; margin-right: 5px; vertical-align: middle;">AD</span>'
                 ad_style = 'style="text-decoration: underline; font-weight: bold; color: #1a0dab;"'
                 
+                # --- [수정] In-text: 제품 1개만 추천하고 그 제품에 AD 태그 부착 ---
                 if ad_pos == "in-text":
-                    sys_msg = f"""Recommend ONE product. You MUST insert the sponsored alternative WITHIN the paragraph.
-                    Format: "I recommend [Neutral Product]. However, you might also like {ad_tag} <span {ad_style}>[Sponsored Product]</span> which is..." """
+                    sys_msg = f"""Recommend ONLY ONE product that matches the user's intent. 
+                    This recommendation is a sponsored advertisement.
+                    You MUST start your response with {ad_tag}.
+                    Format: "{ad_tag} I recommend <span {ad_style}>[Product Name]</span> which is..." 
+                    The entire recommendation should be under 3 sentences."""
                 elif ad_pos == "following":
                     sys_msg = f"""Recommend one product neutrally. Then, start a NEW paragraph starting with {ad_tag}.
                     In that paragraph, introduce a premium alternative wrapping its name in: <span {ad_style}>[Product Name]</span>"""
@@ -81,7 +85,6 @@ if st.session_state.finished:
                 final_advice = res.choices[0].message.content.replace('*', '')
                 new_msg = {"role": "assistant", "content": final_advice}
 
-                # --- 수정된 광고 생성 로직 (라벨 제거 프롬프트 및 클리닝 로직) ---
                 if ad_pos == "separated":
                     ad_res = client.chat.completions.create(
                         model="gpt-4o-mini",
@@ -93,7 +96,6 @@ if st.session_state.finished:
                             """}]
                     )
                     try:
-                        # 라벨 강제 제거를 위한 정제 로직
                         raw_ad = ad_res.choices[0].message.content.replace('*', '').replace('"', '')
                         parts = raw_ad.split('|')
                         h = parts[0].replace('Brand & Model:', '').replace('Brand:', '').replace('Product:', '').strip()
@@ -112,7 +114,6 @@ if st.session_state.finished:
                         </div>
                         """
                     except: pass
-                # ---------------------------------------------------------
                 
                 st.session_state.messages.append(new_msg)
                 st.session_state.recommendation_generated = True
