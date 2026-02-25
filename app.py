@@ -4,10 +4,29 @@ from openai import OpenAI
 import time
 import streamlit.components.v1 as components
 
+# --- [추가] 배경색을 흰색으로 강제 설정하는 CSS ---
+st.set_page_config(page_title="AI Shopping Assistant", layout="centered")
+
+st.markdown("""
+    <style>
+        /* 메인 배경 흰색 */
+        .stApp {
+            background-color: white;
+        }
+        /* 텍스트 색상 검정 (가독성) */
+        .stMarkdown, p, div {
+            color: #31333F;
+        }
+        /* 채팅 입력창 배경색 조정 */
+        .stChatInputContainer {
+            background-color: white;
+        }
+    </style>
+""", unsafe_allow_html=True)
+# ----------------------------------------------
+
 # 1. OpenAI 설정
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
-
-st.set_page_config(page_title="AI Shopping Assistant", layout="centered")
 
 # 2. URL 파라미터 읽기
 query_params = st.query_params
@@ -65,7 +84,6 @@ if st.session_state.finished:
                 ad_tag = '<span style="color: white; background-color: #006621; padding: 2px 5px; border-radius: 3px; font-size: 11px; font-weight: bold; margin-right: 5px; vertical-align: middle;">AD</span>'
                 ad_style = 'style="text-decoration: underline; font-weight: bold; color: #1a0dab;"'
                 
-                # --- [수정] In-text: 제품 1개만 추천하고 그 제품에 AD 태그 부착 ---
                 if ad_pos == "in-text":
                     sys_msg = f"""Recommend ONLY ONE product that matches the user's intent. 
                     This recommendation is a sponsored advertisement.
