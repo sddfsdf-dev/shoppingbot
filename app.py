@@ -4,29 +4,26 @@ from openai import OpenAI
 import time
 import streamlit.components.v1 as components
 
-# --- [추가] 배경색을 흰색으로 강제 설정하는 CSS ---
+# 1. OpenAI 설정
+client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+
 st.set_page_config(page_title="AI Shopping Assistant", layout="centered")
 
+# --- [수정] 채팅 말풍선 내부만 흰색 배경으로 설정 ---
 st.markdown("""
     <style>
-        /* 메인 배경 흰색 */
-        .stApp {
-            background-color: white;
+        /* 채팅 메시지 컨테이너 내부의 배경을 흰색으로 고정 */
+        [data-testid="stChatMessage"] {
+            background-color: white !important;
+            border: 1px solid #f0f2f6; /* 연한 테두리로 구분감 추가 */
         }
-        /* 텍스트 색상 검정 (가독성) */
-        .stMarkdown, p, div {
-            color: #31333F;
-        }
-        /* 채팅 입력창 배경색 조정 */
-        .stChatInputContainer {
-            background-color: white;
+        /* 메시지 내 텍스트 색상을 검정색으로 고정 */
+        [data-testid="stChatMessage"] p, [data-testid="stChatMessage"] div {
+            color: #31333F !important;
         }
     </style>
 """, unsafe_allow_html=True)
 # ----------------------------------------------
-
-# 1. OpenAI 설정
-client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
 # 2. URL 파라미터 읽기
 query_params = st.query_params
